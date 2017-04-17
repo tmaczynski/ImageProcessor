@@ -93,45 +93,36 @@ namespace ImageProcessor.Web.Plugins.PostProcessor
                 return null;
             }
 
-            int elapsedTime = 0;
-            bool eventHandled = false;
-
-            try
+            using (var processingFinished = new ManualResetEventSlim(false))
             {
-                Process process = new Process
+                try
                 {
-                    StartInfo = start,
-                    EnableRaisingEvents = true
-                };
+                    Process process = new Process
+                    {
+                        StartInfo = start,
+                        EnableRaisingEvents = true
+                    };
 
-                process.Exited += (sender, args) =>
+                    process.Exited += (sender, args) =>
+                    {
+                        result = new PostProcessingResultEventArgs(sourceFile, length);
+                        process.Dispose();
+                        processingFinished.Set();
+                    };
+
+                    process.Start();
+                }
+                catch (System.ComponentModel.Win32Exception ex)
                 {
-                    result = new PostProcessingResultEventArgs(sourceFile, length);
-                    process.Dispose();
-                    eventHandled = true;
-                };
+                    // Some security policies don't allow execution of programs in this way
+                    ImageProcessorBootstrapper.Instance.Logger.Log(typeof(PostProcessor), ex.Message);
 
-                process.Start();
-            }
-            catch (System.ComponentModel.Win32Exception ex)
-            {
-                // Some security policies don't allow execution of programs in this way
-                ImageProcessorBootstrapper.Instance.Logger.Log(typeof(PostProcessor), ex.Message);
-
-                return null;
-            }
-
-            // Wait for Exited event, but not more than 5 seconds.
-            const int SleepAmount = 100;
-            while (!eventHandled)
-            {
-                elapsedTime += SleepAmount;
-                if (elapsedTime > 5000)
-                {
-                    break;
+                    return null;
                 }
 
-                Thread.Sleep(SleepAmount);
+                // Wait for processing to finish, but not more than 5 seconds.
+                const int MaxWaitTimeMs = 5000;
+                processingFinished.Wait(MaxWaitTimeMs);
             }
 
             return result;
